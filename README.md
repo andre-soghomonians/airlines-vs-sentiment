@@ -1,2 +1,2 @@
 # airlines-vs-sentiment
-Project that investigates how airline stock returns are impacted by news sentiment of the economy
+This project was completed for my upper-division writing class during my last quarter attending UC Irvine. We were tasked with researching a question related to the stock market, and I chose to see how the daily stock returns of the airline industry were influenced by news sentiment of the economy. This repository has the HTML file with all my code, all the data sets used, as well as my final paper that I uploaded. The HTML file includes broad descriptions of my process, if you would like a more in-depth analysis I recommend reading the final paper. My data sources are cited in the "References" section of the paper as well.  
