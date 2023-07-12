@@ -1,0 +1,366 @@
+---
+title: "News Sentiment vs Airline Companies"
+output: html_document
+date: "2023-07-11"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+This was a project I completed in my upper-division writing class during my final quarter attending UC Irvine. Our assignment was to research the any industry of the stock market and see if we could find any variables that help explained how it fluctuates. For my project, I chose to see how news sentiment relating to the stock market influences the airline industry.
+
+News sentiment data was taken from the paper ["Measuring News Sentiment"](https://www.frbsf.org/economic-research/publications/working-papers/2017/01/) by Adam Shapiro, Moritz Sudhof, and Daniel Wilson. ["Yahoo Finance"](https://finance.yahoo.com/) and the ["Wall Street Journal"](www.wsj.com/market-data/quotes/index/SPX/historical-prices) were used to collect the stock prices of the selected companies. Each of the data was collected daily and covers from May 4, 2007, to April 5, 2021. Although most of the data sources have a date range wider than the selected dates, it was chosen because it is the longest time period where all the data sources overlap. The five selected airline companies include American Airlines, Alaska Air Group, Delta Air Lines, Southwest Airlines, and Untied 
+
+The regression is based off the capital asset pricing model (CAPM) and uses ordinary least squares (OLS) in order to estimate the coefficients. The first regression I did for the paper was a linear regression, but the results were far from satisfactory. After conducting a Breusch-Pagan test, I found evidence for heteroskedasticity. To take this into account, I ran another regression with robust standard errors. Finally, I added dummy variables for the 2008 recession as well as the COVID-19 pandemic to see how much they impacted the results. For a more detailed summary of my process, check the pdf file of my submitted paper. 
+
+
+
+# Project Setup
+
+### Libraries
+```{r Libraries, warning=FALSE}
+library(readxl)
+library(tidyverse)
+library(lubridate)
+library(estimatr)
+library(lmtest)
+library(stats)
+library(gridExtra)
+library(broom)
+```
+
+
+### Loading data
+```{r Loading Data}
+# News Sentiment Data
+news_sentiment_data <- read_excel("C:/Users/onday/OneDrive/Desktop/Econ 137W Paper/news_sentiment_data.xlsx", col_types = c("date", "numeric"), col_names = c('date', 'news_sentiment'), skip = 1)
+
+# S&P 500 Data
+sp500_data <- read_csv("C:/Users/onday/OneDrive/Desktop/Econ 137W Paper/sp500_data.csv")
+
+# Stock Data
+aal_data <- read.csv("C:/Users/onday/OneDrive/Desktop/Econ 137W Paper/aal_data.csv") 
+alk_data <- read.csv("C:/Users/onday/OneDrive/Desktop/Econ 137W Paper/alk_data.csv")
+dal_data <- read.csv("C:/Users/onday/OneDrive/Desktop/Econ 137W Paper/dal_data.csv")
+luv_data <- read.csv("C:/Users/onday/OneDrive/Desktop/Econ 137W Paper/luv_data.csv")
+ual_data <- read.csv("C:/Users/onday/OneDrive/Desktop/Econ 137W Paper/ual_data.csv")
+
+```
+
+# Data Preparation 
+
+### News Sentiment
+```{r}
+# Only data from May 3, 2007
+news_sentiment_data <- news_sentiment_data %>%
+  filter(date > '2007-05-03')
+
+# Transform 'date' column to date data type
+news_sentiment_data$date <- as.Date(news_sentiment_data$date)
+```
+
+### S&P 500
+```{r}
+# Transforming 'date' column to date data type
+sp500_data$Date <- as.Date(sp500_data$Date, format = "%m/%d/%Y")
+
+# Calculate daily returns
+sp500_data <- sp500_data %>% 
+  mutate(sp500_returns = ((Close - lag(Close)) / lag(Close)) * 100)
+
+```
+
+
+## Airline Companies
+```{r}
+# Transform 'date' column to date data type
+aal_data$Date <- as.Date(aal_data$Date, format = "%m/%d/%Y")
+alk_data$Date <- as.Date(alk_data$Date, format = "%m/%d/%Y")
+dal_data$Date <- as.Date(dal_data$Date)
+luv_data$Date <- as.Date(luv_data$Date)
+ual_data$Date <- as.Date(ual_data$Date)
+```
+
+```{r}
+# Stock data
+stock_data <- list(aal_data, alk_data, dal_data, luv_data, ual_data)
+
+
+# Calculating daily returns
+returns <- function(df) {
+  df %>% 
+    mutate(returns = ((Adj.Close - lag(Adj.Close)) / lag(Adj.Close)) * 100)
+}
+
+for (i in seq_along(stock_data)){
+  stock_data[[i]] <- returns(stock_data[[i]])
+}
+
+# Renaming returns columns
+stock_data[[1]] <- rename(stock_data[[1]], aal_returns = returns)
+stock_data[[2]] <- rename(stock_data[[2]], alk_returns = returns)
+stock_data[[3]] <- rename(stock_data[[3]], dal_returns = returns)
+stock_data[[4]] <- rename(stock_data[[4]], luv_returns = returns)
+stock_data[[5]] <- rename(stock_data[[5]], ual_returns = returns)
+
+# Putting all stock return data into a single data frame
+return_data <- stock_data %>% 
+  reduce(full_join, by = "Date") %>% 
+  select(Date, ends_with("returns"))
+
+```
+
+
+# Data Exploration
+
+```{r warning=FALSE}
+# Time series chart for news sentiment
+ggplot(news_sentiment_data, aes(x = date, y = news_sentiment)) +
+  geom_line() +
+  labs(x = 'Date',
+       y = 'News Sentiment',
+       title = 'News Sentiment Data',
+       subtitle = 'May 4, 2007 - April 5, 2021') +
+  scale_x_date(breaks = "12 month") +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5),
+        axis.text.x = element_text(angle = 60, hjust = 1))
+  
+```
+
+```{r warning=FALSE}
+# Time series chart for S&P 500 returns
+ggplot(sp500_data, aes(x = Date, y = sp500_returns)) +
+  geom_line() +
+  labs(x = 'Date',
+       y = 'S&P 500 Returns',
+       title = 'S&P 500 Daily Returns',
+       subtitle = 'May 4, 2007 - April 5, 2021') +
+  scale_x_date(breaks = "12 month") +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5),
+        axis.text.x = element_text(angle = 60, hjust = 1))
+```
+
+```{r warning=FALSE}
+# Time series charts for each airline firm
+ggplot(return_data, aes(x = Date, y = aal_returns)) +
+  geom_line() +
+  labs(x = 'Date',
+       y = 'AAL Returns',
+       title = 'AAL Daily Returns',
+       subtitle = 'May 4, 2007 - April 5, 2021') +
+  scale_x_date(breaks = "12 month") +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5),
+        axis.text.x = element_text(angle = 60, hjust = 1))
+
+ggplot(return_data, aes(x = Date, y = alk_returns)) +
+  geom_line() +
+  labs(x = 'Date',
+       y = 'ALK Returns',
+       title = 'ALK Daily Returns',
+       subtitle = 'May 4, 2007 - April 5, 2021') +
+  scale_x_date(breaks = "12 month") +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5),
+        axis.text.x = element_text(angle = 60, hjust = 1))
+
+ggplot(return_data, aes(x = Date, y = dal_returns)) +
+  geom_line() +
+  labs(x = 'Date',
+       y = 'DAL Returns',
+       title = 'DAL Daily Returns',
+       subtitle = 'May 4, 2007 - April 5, 2021') +
+  scale_x_date(breaks = "12 month") +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5),
+        axis.text.x = element_text(angle = 60, hjust = 1))
+
+ggplot(return_data, aes(x = Date, y = luv_returns)) +
+  geom_line() +
+  labs(x = 'Date',
+       y = 'LUV Returns',
+       title = 'LUV Daily Returns',
+       subtitle = 'May 4, 2007 - April 5, 2021') +
+  scale_x_date(breaks = "12 month") +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5),
+        axis.text.x = element_text(angle = 60, hjust = 1))
+
+ggplot(return_data, aes(x = Date, y = ual_returns)) +
+  geom_line() +
+  labs(x = 'Date',
+       y = 'UAL Returns',
+       title = 'UAL Daily Returns',
+       subtitle = 'May 4, 2007 - April 5, 2021') +
+  scale_x_date(breaks = "12 month") +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5),
+        axis.text.x = element_text(angle = 60, hjust = 1))
+
+```
+
+
+```{r}
+# Summary table for stock returns
+psych::describe(return_data[,-c(1)])
+```
+
+
+# Regression Analysis
+
+### First Regression: Linear Model
+
+```{r}
+# Dataset containing all variables needed for analysis
+final_data <- full_join(return_data, news_sentiment_data, by = c('Date'='date'))
+final_data <- full_join(final_data, sp500_data, by = "Date") %>%
+  select(Date, aal_returns, alk_returns, dal_returns, luv_returns, ual_returns, news_sentiment, sp500_returns)
+head(final_data)
+  
+```
+
+```{r}
+# Linear Regression
+lm_models <- list(
+  aal_results = lm(aal_returns ~ sp500_returns + news_sentiment, data = final_data),
+  alk_results = lm(alk_returns ~ sp500_returns + news_sentiment, data = final_data),
+  dal_results = lm(dal_returns ~ sp500_returns + news_sentiment, data = final_data),
+  luv_results = lm(luv_returns ~ sp500_returns + news_sentiment, data = final_data),
+  ual_results = lm(ual_returns ~ sp500_returns + news_sentiment, data = final_data)
+)
+
+lm_results <- lapply(lm_models, tidy)
+lm_results_df <- do.call(rbind, lm_results)
+lm_results_df
+```
+
+After running a linear regression on the data, there appears to be no significant relationship between any of the airline companies and news sentiment. None of the p-values are close to anything statistically significant and the coefficient estimates are all close to zero. Based on the line graphs from earlier, I suspect this can be partly explained by the data being heteroskedastic. 
+
+### Second Model: Linear Regression with Robust Standard Errors
+
+```{r}
+# Breusch-Pagan Test to test for heteroskedasticity
+bp_tests <- list(
+  aal_bp = bptest(lm_models[[1]]),
+  alk_bp = bptest(lm_models[[2]]),
+  dal_bp = bptest(lm_models[[3]]),
+  luv_bp = bptest(lm_models[[4]]),
+  ual_bp = bptest(lm_models[[5]])
+)
+
+bp_results <- lapply(bp_tests, tidy)
+bp_results_df <- do.call(rbind, bp_results)
+bp_results_df
+```
+
+As the results of the Breusch-Pagan test clearly show, there is heteroskedasticity in each model. To take this into account, I will run the same regression but use robust standard errors instead. 
+
+```{r}
+# Regression with robust standard errors
+robust_models <- list(
+  ual_robust = lm_robust(ual_returns ~ sp500_returns + news_sentiment, data = final_data),
+  aal_robust = lm_robust(aal_returns ~ sp500_returns + news_sentiment, data = final_data),
+  alk_robust = lm_robust(alk_returns ~ sp500_returns + news_sentiment, data = final_data),
+  dal_robust = lm_robust(dal_returns ~ sp500_returns + news_sentiment, data = final_data),
+  luv_robust = lm_robust(luv_returns ~ sp500_returns + news_sentiment, data = final_data)
+)
+
+robust_results <- lapply(robust_models, tidy)
+robust_results_df <- do.call(rbind, robust_results)
+robust_results_df
+
+```
+
+Even when taking into account heteroskedasticity, the results are far from definitive. This model runs into the same problems as the first one. There is not strong enough evidence to conclude that the dependent and independent variables have a linear relationship. 
+
+### Model 3: Taking Into Account Recessions 
+
+During the 15-year time span of the data, there were two big economic recessions. The first was the 2008 financial crisis and the second being the 2020 COVID-19 pandemic. Each created volatile economic conditions, with the airline industry being hit in particularly hard during the pandemic. To test how much these events influenced the model, I added two dummy variables. The variable 'recession' has a value of 1 if the date is during the 2008 recession and 0 otherwise. Similarly, the variable'covid' has a value of 1 if the date is during the pandemic and 0 otherwise. 
+
+```{r}
+# Adding dummy variables for each event
+final_data$recession <- ifelse(final_data$Date > '2007-12-01' & final_data$Date < '2009-06-01', 1, 0)
+final_data$covid <- ifelse(final_data$Date > '2020-02-01', 1, 0)
+```
+
+```{r}
+# New regressions
+recession_models <- list(
+  aal_recession = lm_robust(aal_returns ~ sp500_returns + news_sentiment + covid + recession, data = final_data),
+  alk_recession = lm_robust(alk_returns ~ sp500_returns + news_sentiment + covid + recession, data = final_data),
+  dal_recession = lm_robust(dal_returns ~ sp500_returns + news_sentiment + covid + recession, data = final_data), 
+  luv_recession = lm_robust(luv_returns ~ sp500_returns + news_sentiment + covid + recession, data = final_data),
+  ual_recession = lm_robust(ual_returns ~ sp500_returns + news_sentiment + covid + recession, data = final_data)
+)
+
+recession_results <- lapply(recession_models, tidy)
+recession_results_df <- do.call(rbind, recession_results)
+recession_results_df
+```
+
+Like the other two models, no statistically significant conclusions can be drawn from the models. Although there is slight improvement compared to the first, it is still far from being a good model.
+
+# Conclusion
+
+After running three separate regressions, there is not enough evidence to conclude a linear relationship between the daily stock returns of airline companies and news sentiment of the economy. This is likely due to a multitude of factors. The model likely suffers from omitted variable bias, where confounding variables are excluded from the model. A linear relationship may also not be the best way to explain their relationship, in the future I would like to test other regressions such as logarithmic or exponential. 
+
+
+
+# Appendix
+
+### Appendix 1: News sentiment regressed against stock returns
+```{r warning=FALSE}
+# AAL
+ggplot(data = final_data, aes(x = news_sentiment, y = aal_returns))+
+  geom_point() +
+  labs(x = "News Sentiment",
+       y = "Daily Stock Returns",
+       title = "AAL") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r warning=FALSE}
+# ALK
+ggplot(data = final_data, aes(x = news_sentiment, y = alk_returns)) +
+  geom_point() +
+  labs(x = "News Sentiment",
+       y = "Daily Stock Returns",
+       title = "ALK") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r warning=FALSE}
+# DAL
+ggplot(data = final_data, aes(x = news_sentiment, y = dal_returns)) +
+  geom_point() +
+  labs(x = "News Sentiment",
+       y = "Daily Stock Returns",
+       title = "DAL") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r warning=FALSE}
+# LUV
+ggplot(data = final_data, aes(x = news_sentiment, y = luv_returns)) +
+  geom_point() +
+  labs(x = "News Sentiment",
+       y = "Daily Stock Returns",
+       title = "LUV") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r warning=FALSE}
+# UAL
+ggplot(data = final_data, aes(x = news_sentiment, y = ual_returns)) +
+  geom_point() +
+  labs(x = "News Sentiment",
+       y = "Daily Stock Returns",
+       title = "UAL") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
